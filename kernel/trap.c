@@ -76,6 +76,31 @@ usertrap(void)
   if(p->killed)
     exit(-1);
 
+  if(which_dev == 2) {
+    if (p->ticks != 0 && p->ticks == ++(p->tot) 
+               && p->sigbusy == 0) {
+      p->tot = 0;
+      p->sigbusy = 1;
+      // backup registers
+      p->sigtrapframe.epc = p->trapframe->epc;
+      p->sigtrapframe.ra = p->trapframe->ra;
+      p->sigtrapframe.sp = p->trapframe->sp;
+      p->sigtrapframe.s0 = p->trapframe->s0;
+      p->sigtrapframe.s1 = p->trapframe->s1;
+      p->sigtrapframe.s2 = p->trapframe->s2;
+      p->sigtrapframe.s3 = p->trapframe->s3;
+      p->sigtrapframe.s4 = p->trapframe->s4;
+      p->sigtrapframe.s5 = p->trapframe->s5;
+      p->sigtrapframe.a0 = p->trapframe->a0;
+      p->sigtrapframe.a1 = p->trapframe->a1;
+      p->sigtrapframe.a2 = p->trapframe->a2;
+      p->sigtrapframe.a3 = p->trapframe->a3;
+      p->sigtrapframe.a4 = p->trapframe->a4;
+      p->sigtrapframe.a5 = p->trapframe->a5;
+      p->trapframe->epc = (uint64)(p->handler);
+    }
+  }
+
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2)
     yield();
