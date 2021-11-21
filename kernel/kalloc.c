@@ -14,6 +14,10 @@ void freerange(void *pa_start, void *pa_end);
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
 
+int refc[(PHYSTOP - KERNBASE) / PGSIZE]; // to trace reference count
+
+struct spinlock refc_lock;
+
 struct run {
   struct run *next;
 };
@@ -27,6 +31,7 @@ void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  initlock(&refc_lock, "cowlock");
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -62,6 +67,25 @@ kfree(void *pa)
   release(&kmem.lock);
 }
 
+void
+cowkfree(void *pa)
+{
+  acquire(&refc_lock);
+  uint64 idx = ((uint64)pa - KERNBASE) / PGSIZE;
+  refc[idx]--;
+  int refcount = refc[idx];
+  release(&refc_lock);
+
+  if (refcount > 0) {
+    return;
+  }
+  if (refcount < 0) {
+    panic("cow: negtive refcount");
+  }
+
+  kfree(pa);
+}
+
 // Allocate one 4096-byte page of physical memory.
 // Returns a pointer that the kernel can use.
 // Returns 0 if the memory cannot be allocated.
@@ -72,11 +96,21 @@ kalloc(void)
 
   acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  if(r) {
     kmem.freelist = r->next;
+    refc[((uint64)r - KERNBASE) / PGSIZE] = 1;
+  }
   release(&kmem.lock);
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+}
+
+void
+refcinc(uint64 pa)
+{
+  acquire(&refc_lock);
+  refc[(pa - KERNBASE) / PGSIZE]++;
+  release(&refc_lock);
 }
