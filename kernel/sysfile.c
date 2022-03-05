@@ -254,6 +254,8 @@ create(char *path, short type, short major, short minor)
     ilock(ip);
     if(type == T_FILE && (ip->type == T_FILE || ip->type == T_DEVICE))
       return ip;
+    if(type == T_SYMLINK && ip->type == T_SYMLINK)
+      return ip;
     iunlockput(ip);
     return 0;
   }
@@ -280,6 +282,57 @@ create(char *path, short type, short major, short minor)
 
   iunlockput(dp);
 
+  return ip;
+}
+
+uint64
+sys_symlink(void) {
+  char target[MAXPATH], path[MAXPATH];
+  struct inode *ip;
+  int n;
+
+  if((n = argstr(0, target, MAXPATH)) < 0 
+    || argstr(1, path, MAXPATH) < 0) {
+    return -1;
+  }
+  begin_op();
+  if((ip = create(path, T_SYMLINK, 0, 0)) == 0){
+    end_op();
+    return -1;
+  }
+  if (writei(ip, 0, (uint64)target, 0, n) != n) {
+    iunlockput(ip);
+    end_op();
+    return -1;
+  };
+  iunlockput(ip);
+  end_op();
+
+  return 0;
+}
+
+static struct inode*
+getsyminode(struct inode *ip, int depth) {
+  // You may approximate this by returning an error code 
+  // if the depth of links reaches some threshold (e.g., 10)
+  if (depth >= 10) {
+    return 0;
+  }
+  int r = 0;
+  char target[MAXPATH];
+  if((r = readi(ip, 0, (uint64)target, 0, MAXPATH)) < 0) {
+    iunlockput(ip);
+    return 0;
+  }
+  iunlockput(ip);
+  // If the file does not exist, open must fail. 
+  if((ip = namei(target)) == 0){
+    return 0;
+  }
+  ilock(ip);
+  if(ip->type == T_SYMLINK){
+    return getsyminode(ip, ++depth);
+  } 
   return ip;
 }
 
@@ -311,6 +364,13 @@ sys_open(void)
     ilock(ip);
     if(ip->type == T_DIR && omode != O_RDONLY){
       iunlockput(ip);
+      end_op();
+      return -1;
+    }
+  }
+  
+  if (ip->type == T_SYMLINK && (omode & O_NOFOLLOW) == 0) {
+    if ((ip = getsyminode(ip, 0)) == 0) {
       end_op();
       return -1;
     }
